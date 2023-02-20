@@ -46,12 +46,24 @@ impl App {
                 .find(|(_, p)| p.queue_flags.contains(vk::QueueFlags::VIDEO_ENCODE_KHR))
                 .map(|(i, _)| i)
                 .unwrap() as u32;
+            let decode_queue_index = queue_properties
+                .iter()
+                .enumerate()
+                .find(|(_, p)| p.queue_flags.contains(vk::QueueFlags::VIDEO_DECODE_KHR))
+                .map(|(i, _)| i)
+                .unwrap() as u32;
 
             let device_extensions = vec![
                 CStr::from_bytes_with_nul(b"VK_KHR_video_queue\0")
                     .unwrap()
                     .as_ptr(),
                 CStr::from_bytes_with_nul(b"VK_KHR_video_encode_queue\0")
+                    .unwrap()
+                    .as_ptr(),
+                CStr::from_bytes_with_nul(b"VK_KHR_video_decode_queue\0")
+                    .unwrap()
+                    .as_ptr(),
+                CStr::from_bytes_with_nul(b"VK_KHR_video_decode_h264\0")
                     .unwrap()
                     .as_ptr(),
                 CStr::from_bytes_with_nul(b"VK_EXT_video_encode_h264\0")
@@ -62,10 +74,16 @@ impl App {
                 .create_device(
                     physical_device,
                     &vk::DeviceCreateInfo::builder()
-                        .queue_create_infos(&[vk::DeviceQueueCreateInfo::builder()
-                            .queue_family_index(encode_queue_index)
-                            .queue_priorities(&[1.0])
-                            .build()])
+                        .queue_create_infos(&[
+                            vk::DeviceQueueCreateInfo::builder()
+                                .queue_family_index(encode_queue_index)
+                                .queue_priorities(&[1.0])
+                                .build(),
+                            vk::DeviceQueueCreateInfo::builder()
+                                .queue_family_index(decode_queue_index)
+                                .queue_priorities(&[1.0])
+                                .build(),
+                        ])
                         .enabled_extension_names(&device_extensions)
                         .build(),
                     None,
@@ -120,25 +138,35 @@ impl App {
                 }
             });
 
-            let video_profile = vk::VideoProfileKHR::builder()
+            let video_profile = vk::VideoProfileInfoKHR::builder()
                 .chroma_subsampling(vk::VideoChromaSubsamplingFlagsKHR::TYPE_420)
                 .chroma_bit_depth(vk::VideoComponentBitDepthFlagsKHR::TYPE_8)
                 .luma_bit_depth(vk::VideoComponentBitDepthFlagsKHR::TYPE_8)
-                .video_codec_operation(vk::VideoCodecOperationFlagsKHR::ENCODE_H264_EXT)
+                .video_codec_operation(vk::VideoCodecOperationFlagsKHR::DECODE_H264)
                 .build();
-            let mut video_capabilities = vk::VideoCapabilitiesKHR::default();
-            (video_queue_fn.get_physical_device_video_capabilities_khr)(
-                physical_device,
-                &video_profile,
-                &mut video_capabilities,
-            )
-            .result()
-            .unwrap();
+            // let mut video_capabilities = vk::VideoCapabilitiesKHR::default();
+            // (video_queue_fn.get_physical_device_video_capabilities_khr)(
+            //     physical_device,
+            //     &video_profile,
+            //     &mut video_capabilities,
+            // )
+            // .result()
+            // .unwrap();
 
             let video_session_info = vk::VideoSessionCreateInfoKHR::builder()
                 .video_profile(&video_profile)
                 .max_coded_extent(vk::Extent2D::builder().width(1920).height(1080).build())
-                .std_header_version(&vk::ExtensionProperties::builder().build())
+                .std_header_version(
+                    &vk::ExtensionProperties::builder()
+                        .extension_name(
+                            *CStr::from_bytes_with_nul(b"VK_STD_vulkan_video_codec_h264_decode\0")
+                                .unwrap()
+                                .as_ptr()
+                                .cast::<[i8; 256]>(),
+                        )
+                        .spec_version(vk::make_api_version(0, 1, 0, 0))
+                        .build(),
+                )
                 .build();
             let mut video_session = vk::VideoSessionKHR::null();
             (video_queue_fn.create_video_session_khr)(
